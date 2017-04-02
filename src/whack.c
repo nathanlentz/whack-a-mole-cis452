@@ -29,9 +29,10 @@ int mole_down_duration;
 int mole_up_duration;
 int semId;
 int yMax, xMax;
-bool isPlaying = true;
+int isPlaying = 0; 	// 0: true, 1: false
 char *targets;
 char **board;
+int molesHit;
 
 struct game_settings {
 	int grid_height;
@@ -46,6 +47,7 @@ difficulty currentDifficulty;
 
 /* Prototypes */
 void* moleQueue(void *settings);
+void* gameTracker(void *params);
 void moleHitHandler(int signal);
 void welcomeScreen(int row, int col);
 char* getDifficulty();
@@ -77,15 +79,23 @@ int main (int argc, char *argv[])
 	struct game_settings gameSettings;
 	int status;
 
-	/* Init Mutex */
-
-	/* Semaphore */
-
 	// Set game settings
 	gameSettings.grid_height = atoi(argv[1]);
 	gameSettings.grid_width = atoi(argv[2]);
 	gameSettings.num_moles = atoi(argv[3]);
 	gameSettings.max_active_moles = atoi(argv[4]);
+	molesHit = 0;
+
+	/* Init Mutex */
+	pthread_mutex_init(&hit_mutex, NULL);
+	pthread_mutex_init(&moles_active_mutex, NULL);
+
+	/* Semaphore */
+	int res = sem_init(&mole_active_enter, 0, gameSettings.num_moles);
+	if(res < 0){
+		perror("Semaphore init failure");
+		exit(1);
+	}
 
 	// TODO: Validation on game settings (i.e. max active moles !> num moles)
 
@@ -99,15 +109,9 @@ int main (int argc, char *argv[])
 	getmaxyx(stdscr, yMax, xMax);
 	
 	welcomeScreen(yMax, xMax);
-	printw("Your selected difficulty: %s", getDifficulty());
 
 
 	setMoleDifficulty();
-
-	move(1, 0);
-	
-	printw("Board Size: %d", gameSettings.grid_width*gameSettings.grid_height);
-	move(1,0);
 
 	targets = "abcdefghijklmnopqrstuvwxyz0123456789";
 
@@ -120,12 +124,11 @@ int main (int argc, char *argv[])
 		}
 	}
 
-	
-	printw("Press any key to continue");
-	getch();
-	clear();
+	move(yMax-1,0);
+	printw("Your selected difficulty: %s", getDifficulty());
 
 	/* PRINT LARGE WHACK A MOLE TEXT HERE */
+	move(0,0);
 	int c;
 	FILE *file;
 	file = fopen("moleArt.txt", "r");
@@ -143,40 +146,52 @@ int main (int argc, char *argv[])
 			board[i][j] = '_';
 			move(gridY+j*2, gridX+(i*5));
 			printw("%c", board[i][j]);;
+			refresh();
 		}
 	}
+
+	getch();
 	
 	pthread_t threads[gameSettings.num_moles];
+	pthread_t trackerThread;
 
-	//for(i = 0; i < gameSettings.num_moles; i++){
-	for(i = 0; i < 1; i++){
+	if((status = pthread_create(&trackerThread, NULL, gameTracker, NULL)) != 0){
+			fprintf(stderr, "Game Tracker Error %d: %s\n", status, strerror(status));
+			endwin();
+	}
+	for(i = 0; i < gameSettings.num_moles; i++){
 		if((status = pthread_create(&threads[i], NULL, moleQueue, (void*)&targets[i])) != 0){
 			fprintf(stderr, "mole create error %d: %s\n", status, strerror(status));
-			exit(1);
+			endwin();
 		}
 	}
-	// printw("YOOOOOOO");
-	// while(isPlaying){
-	// 	char input;
-	// 	//updateBoard(gameSettings.grid_width, gameSettings.grid_height);
-	// 	if((input = getchar()) == 0x1B){
-	// 		isPlaying = false;
-	// 	}
-	// }
-	
-	//Set board and create threads (moles)
 
+	while(isPlaying == 0){
+		updateBoard(gameSettings.grid_width, gameSettings.grid_height);
+	}
+
+
+	pthread_join(trackerThread, NULL);
 	for(i = 0; i < 1; i++){
 		pthread_join(threads[i], NULL);
 	}
 
-	// // Clean UP
-	// pthread_mutex_destroy(&hit_mutex);
-	// pthread_mutex_destroy(&moles_active_mutex);
-	// sem_destroy(&mole_active_enter);
-	updateBoard(gameSettings.grid_width, gameSettings.grid_height);
 
+	clear();
+
+	move(0,0);
+	printw("All moles gone for now, press key to exit");
+	refresh();
 	getch();
+
+
+	// // Clean UP
+	pthread_mutex_destroy(&hit_mutex);
+	pthread_mutex_destroy(&moles_active_mutex);
+	sem_destroy(&mole_active_enter);
+//	updateBoard(gameSettings.grid_width, gameSettings.grid_height);
+
+
 	endwin();
 
 	free(board);
@@ -190,17 +205,49 @@ int main (int argc, char *argv[])
 *******************************************************/
 void* moleQueue(void *target){
 	char *moleHead = target;
-	board[3][3] = *moleHead;
-	// while(isPlaying){
-	// 	board[3][3] = *moleHead;
-	// 	// wait random amount of time
-	// 	// try to enter semaphore
-	// 	// access mutex
-	// 	// do mole things
-	// 	// leave semaphore
-	// 	// repeat
-	// }
+	int waitUp;
+	int waitDown;
+	//board[3][3] = *moleHead;
+	while(isPlaying == 0){
+		waitUp = rand() % (mole_down_duration + 1 - 0);
+		waitDown = rand() % (mole_up_duration + 1 - 0);
+		sleep(waitUp);
+		// Wait to access board
+		sem_wait(&mole_active_enter);
+		// Pick a spot to 'pop'at
+		// pthread_mutext_lock(&moles_active_mutex);
+		// moles_active_mutex++;
+		// pthread_mutext_unlock(&moles_active_mutex);
+		board[3][3] = *moleHead;
+		sleep(waitDown);
+		board[3][3] = '_';
 
+
+		sem_post(&mole_active_enter);
+		// wait random amount of time
+		// try to enter semaphore
+		// access mutex
+		// do mole things
+		// leave semaphore
+		// repeat
+	}
+
+	return 0;
+}
+
+/******************************************************
+* Track player input to change state. If esc is pressed
+* change isPlaying state
+*******************************************************/
+void* gameTracker(void *params){
+	board[5][5] = 's';
+ 	while(1){
+		char input;
+		if((input = getchar()) == 0x1B){ 	// Escape key
+			isPlaying = 1;
+			break;
+		}
+	}
 	return 0;
 }
 
@@ -217,9 +264,14 @@ void updateBoard(int width, int height){
 	for(i = 0; i < width; i++){
 		for(j = 0; j < height; j++){
 			move(gridY+j*2, gridX+(i*5));
-			printw("%c", board[i][j]);;
+			printw("%c", board[i][j]);
+			refresh();
 		}
 	}
+	// Draw updated stat
+	move(10,0);
+	printw("MOLES SMACKED: %d", molesHit);
+	refresh();
 }
 
 /******************************************************
@@ -255,6 +307,7 @@ void welcomeScreen(int yMax, int xMax)
 	int titleSize = strlen(title);
 	move(10, xMax/2 - (titleSize/1.5));
 	printw(title);
+	refresh();
 	move(1,0);
 	WINDOW * menuwin = newwin(6, titleSize, yMax - 15, xMax/2 - (titleSize/1.5));
 	box(menuwin, 0,0);
@@ -331,16 +384,16 @@ void welcomeScreen(int yMax, int xMax)
 void setMoleDifficulty(){
 	switch(currentDifficulty){
 		case EASY:
-			mole_down_duration = 3;
-			mole_up_duration = 3;
+			mole_down_duration = 7;
+			mole_up_duration = 7;
 		case MEDIUM:
-			mole_down_duration = 2;
-			mole_up_duration = 2;
+			mole_down_duration = 5;
+			mole_up_duration = 5;
 		case HARD:
-			mole_down_duration = 1;
-			mole_up_duration = 1;
-		default:
 			mole_down_duration = 3;
 			mole_up_duration = 3;
+		default:
+			mole_down_duration = 7;
+			mole_up_duration = 7;
 	}
 }
