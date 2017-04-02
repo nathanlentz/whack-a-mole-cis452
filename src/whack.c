@@ -59,8 +59,8 @@ void setMoleDifficulty();
 void updateBoard(int width, int height);
 
 /* Mutex to protect access to hit counter and moles in */
-pthread_mutex_t hit_mutex;
-pthread_mutex_t moles_missed_mutex;
+static pthread_mutex_t hit_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t moles_missed_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* Semaphore for mole synching */
 sem_t mole_active_enter;
@@ -96,8 +96,8 @@ int main (int argc, char *argv[])
 	boardHeight = gameSettings.grid_height;
 
 	/* Init Mutex */
-	pthread_mutex_init(&hit_mutex, NULL);
-	pthread_mutex_init(&moles_missed_mutex, NULL);
+	//pthread_mutex_init(&hit_mutex, NULL);
+	//pthread_mutex_init(&moles_missed_mutex, NULL);
 
 	/* Semaphore */
 	int res = sem_init(&mole_active_enter, 0, gameSettings.max_active_moles);
@@ -245,14 +245,7 @@ void* moleQueue(void *target){
 		}
 		board[row][column] = '_';
 
-
 		sem_post(&mole_active_enter);
-		// wait random amount of time
-		// try to enter semaphore
-		// access mutex
-		// do mole things
-		// leave semaphore
-		// repeat
 	}
 
 	return 0;
