@@ -238,7 +238,7 @@ void* moleQueue(void *target){
 		}
 		
 		sleep(waitDown);
-		if(board[row][column] == '_'){
+		if(board[row][column] == *moleHead){
 			pthread_mutex_lock(&moles_missed_mutex);
 			molesMissed++;
 			pthread_mutex_unlock(&moles_missed_mutex);
@@ -305,8 +305,10 @@ void updateBoard(int width, int height){
 	refresh();
 	move(11,1);
 	printw("MOLES MISSED: %d", molesMissed);
+	refresh();
 	move(12,1);
 	printw("CRAPPY SWINGS: %d", inaccurateHits);
+	refresh();
 
 }
 
