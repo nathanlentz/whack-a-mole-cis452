@@ -33,6 +33,10 @@ int isPlaying = 0; 	// 0: true, 1: false
 char *targets;
 char **board;
 int molesHit;
+int molesMissed;
+int boardWidth;
+int boardHeight;
+int inaccurateHits;
 
 struct game_settings {
 	int grid_height;
@@ -56,7 +60,7 @@ void updateBoard(int width, int height);
 
 /* Mutex to protect access to hit counter and moles in */
 pthread_mutex_t hit_mutex;
-pthread_mutex_t moles_active_mutex;
+pthread_mutex_t moles_missed_mutex;
 
 /* Semaphore for mole synching */
 sem_t mole_active_enter;
@@ -85,13 +89,18 @@ int main (int argc, char *argv[])
 	gameSettings.num_moles = atoi(argv[3]);
 	gameSettings.max_active_moles = atoi(argv[4]);
 	molesHit = 0;
+	molesMissed = 0;
+	inaccurateHits = 0;
+
+	boardWidth = gameSettings.grid_width;
+	boardHeight = gameSettings.grid_height;
 
 	/* Init Mutex */
 	pthread_mutex_init(&hit_mutex, NULL);
-	pthread_mutex_init(&moles_active_mutex, NULL);
+	pthread_mutex_init(&moles_missed_mutex, NULL);
 
 	/* Semaphore */
-	int res = sem_init(&mole_active_enter, 0, gameSettings.num_moles);
+	int res = sem_init(&mole_active_enter, 0, gameSettings.max_active_moles);
 	if(res < 0){
 		perror("Semaphore init failure");
 		exit(1);
@@ -187,9 +196,8 @@ int main (int argc, char *argv[])
 
 	// // Clean UP
 	pthread_mutex_destroy(&hit_mutex);
-	pthread_mutex_destroy(&moles_active_mutex);
+	pthread_mutex_destroy(&moles_missed_mutex);
 	sem_destroy(&mole_active_enter);
-//	updateBoard(gameSettings.grid_width, gameSettings.grid_height);
 
 
 	endwin();
@@ -207,20 +215,35 @@ void* moleQueue(void *target){
 	char *moleHead = target;
 	int waitUp;
 	int waitDown;
+	int row;
+	int column;
+	int spotFound;
 	//board[3][3] = *moleHead;
 	while(isPlaying == 0){
+		spotFound = 0;
 		waitUp = rand() % (mole_down_duration + 1 - 0);
 		waitDown = rand() % (mole_up_duration + 1 - 0);
+		// TODO only works with 6x6 grid right now
+
 		sleep(waitUp);
 		// Wait to access board
 		sem_wait(&mole_active_enter);
-		// Pick a spot to 'pop'at
-		// pthread_mutext_lock(&moles_active_mutex);
-		// moles_active_mutex++;
-		// pthread_mutext_unlock(&moles_active_mutex);
-		board[3][3] = *moleHead;
+		while(spotFound == 0){
+			row = rand() % (boardHeight + 1 - 1);
+			column = rand() % (boardWidth + 1 - 0);
+			if(board[row][column] == '_'){
+				board[row][column] = *moleHead;
+				spotFound = 1;
+			}
+		}
+		
 		sleep(waitDown);
-		board[3][3] = '_';
+		if(board[row][column] == '_'){
+			pthread_mutex_lock(&moles_missed_mutex);
+			molesMissed++;
+			pthread_mutex_unlock(&moles_missed_mutex);
+		}
+		board[row][column] = '_';
 
 
 		sem_post(&mole_active_enter);
@@ -240,13 +263,28 @@ void* moleQueue(void *target){
 * change isPlaying state
 *******************************************************/
 void* gameTracker(void *params){
-	board[5][5] = 's';
+	int i,j;
+	int isMiss;
  	while(1){
+ 		isMiss = 0;
 		char input;
 		if((input = getchar()) == 0x1B){ 	// Escape key
 			isPlaying = 1;
 			break;
 		}
+		for(i = 0; i < boardWidth; i++){
+			for(j = 0; j < boardHeight; j++){
+				if(board[i][j] == input){
+					molesHit++;
+					board[i][j] = '_';
+					isMiss = 1;
+				} 
+			}
+		}
+		if(isMiss == 0){
+			inaccurateHits++;
+		}
+
 	}
 	return 0;
 }
@@ -269,9 +307,14 @@ void updateBoard(int width, int height){
 		}
 	}
 	// Draw updated stat
-	move(10,0);
+	move(10,1);
 	printw("MOLES SMACKED: %d", molesHit);
 	refresh();
+	move(11,1);
+	printw("MOLES MISSED: %d", molesMissed);
+	move(12,1);
+	printw("CRAPPY SWINGS: %d", inaccurateHits);
+
 }
 
 /******************************************************
@@ -383,6 +426,7 @@ void welcomeScreen(int yMax, int xMax)
 *************************************************************/
 void setMoleDifficulty(){
 	switch(currentDifficulty){
+		// TODO: Add a 'max' and 'min' time duration
 		case EASY:
 			mole_down_duration = 7;
 			mole_up_duration = 7;
