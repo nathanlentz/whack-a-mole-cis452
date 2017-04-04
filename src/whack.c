@@ -6,10 +6,13 @@
 #include <pthread.h> 
 #include <sys/types.h>
 #include <semaphore.h>
+#include <signal.h>
+#include <time.h>
 
 #define MAX_HEIGHT 6
 #define MAX_WIDTH 6
 #define MAX_MOLES 36
+#define WIN_COUNT 10
 
 
 /************************************************************
@@ -57,9 +60,12 @@ void welcomeScreen(int row, int col);
 char* getDifficulty();
 void setMoleDifficulty();
 void updateBoard(int width, int height);
+void endGameSignalHandler(int signal);
+void printStats();
 
 /* Mutex to protect access to hit counter and moles in */
 static pthread_mutex_t hit_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t edit_board_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t moles_missed_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* Semaphore for mole synching */
@@ -107,9 +113,22 @@ int main (int argc, char *argv[])
 	}
 
 	// TODO: Validation on game settings (i.e. max active moles !> num moles)
+	if(gameSettings.grid_width > 6 || gameSettings.grid_height > 6){
+		printf("Grid must be no larger than 6 x 6\n\n");
+		exit(1);
+	}
+
+	if(gameSettings.grid_width*gameSettings.grid_width < gameSettings.num_moles){
+		printf("Number of moles cannot exceed number of grid cells\n\n");
+		exit(1);
+	}
+
+	if(gameSettings.num_moles < gameSettings.max_active_moles){
+		printf("Max active moles must be less than or equal to total number of moles\n\n");
+		exit(1);
+	}
 
 	/* NCURSES COORDINATES TAKE Y FIRST, FOLLOWED BY X */
-	
 
 	initscr();
 	noecho();
@@ -117,9 +136,10 @@ int main (int argc, char *argv[])
 	// Get Window Size
 	getmaxyx(stdscr, yMax, xMax);
 	
+	// Draw welcome screen and difficulty menu
 	welcomeScreen(yMax, xMax);
 
-
+	// Set mole up/down time based on difficulty
 	setMoleDifficulty();
 
 	targets = "abcdefghijklmnopqrstuvwxyz0123456789";
@@ -135,6 +155,11 @@ int main (int argc, char *argv[])
 
 	move(yMax-1,0);
 	printw("Your selected difficulty: %s", getDifficulty());
+	refresh();
+	move(yMax-2, 0);
+	printw("Press any key to begin");
+	refresh();
+
 
 	/* PRINT LARGE WHACK A MOLE TEXT HERE */
 	move(0,0);
@@ -160,6 +185,8 @@ int main (int argc, char *argv[])
 	}
 
 	getch();
+	move(yMax-2, 0);
+	clrtoeol();
 	
 	pthread_t threads[gameSettings.num_moles];
 	pthread_t trackerThread;
@@ -180,25 +207,26 @@ int main (int argc, char *argv[])
 	}
 
 
-	pthread_join(trackerThread, NULL);
+
 	for(i = 0; i < 1; i++){
 		pthread_join(threads[i], NULL);
-	}
+	}	
+	
+	
+	pthread_join(trackerThread, NULL);
 
+	printStats();
 
-	clear();
-
-	move(0,0);
+	move(3,0);
 	printw("All moles gone for now, press key to exit");
 	refresh();
 	getch();
 
-
-	// // Clean UP
+	// Clean UP
 	pthread_mutex_destroy(&hit_mutex);
 	pthread_mutex_destroy(&moles_missed_mutex);
+	pthread_mutex_destroy(&edit_board_mutex);
 	sem_destroy(&mole_active_enter);
-
 
 	endwin();
 
@@ -218,9 +246,12 @@ void* moleQueue(void *target){
 	int row;
 	int column;
 	int spotFound;
-	//board[3][3] = *moleHead;
+	time_t startTime, stayUpTime;
+	
 	while(isPlaying == 0){
 		spotFound = 0;
+
+		//startTime = time();
 		waitUp = rand() % (mole_down_duration + 1 - 0);
 		waitDown = rand() % (mole_up_duration + 1 - 0);
 
@@ -230,10 +261,15 @@ void* moleQueue(void *target){
 		while(spotFound == 0){
 			row = rand() % (boardHeight + 1 - 1);
 			column = rand() % (boardWidth + 1 - 0);
-			if(board[row][column] == '_'){
-				board[row][column] = *moleHead;
-				spotFound = 1;
+			// Only allow one mole to check and edit the board at once
+			// If a mole is there, it needs to wait
+			pthread_mutex_lock(&edit_board_mutex);
+				if(board[row][column] == '_'){
+					board[row][column] = *moleHead;
+					spotFound = 1;
 			}
+			pthread_mutex_unlock(&edit_board_mutex);
+			
 		}
 		
 		sleep(waitDown);
@@ -246,7 +282,7 @@ void* moleQueue(void *target){
 
 		sem_post(&mole_active_enter);
 	}
-
+	clear();
 	return 0;
 }
 
@@ -257,20 +293,23 @@ void* moleQueue(void *target){
 void* gameTracker(void *params){
 	int i,j;
 	int isMiss;
- 	while(1){
+ 	while(isPlaying == 0){
  		isMiss = 0;
 		char input;
 		if((input = getchar()) == 0x1B){ 	// Escape key
 			isPlaying = 1;
 			break;
 		}
+
 		for(i = 0; i < boardWidth; i++){
 			for(j = 0; j < boardHeight; j++){
+				pthread_mutex_lock(&edit_board_mutex);
 				if(board[i][j] == input){
 					molesHit++;
 					board[i][j] = '_';
 					isMiss = 1;
 				} 
+				pthread_mutex_unlock(&edit_board_mutex);
 			}
 		}
 		if(isMiss == 0){
@@ -309,6 +348,9 @@ void updateBoard(int width, int height){
 	printw("CRAPPY SWINGS: %d", inaccurateHits);
 	refresh();
 
+	if(molesHit == WIN_COUNT){
+		isPlaying = 1;			
+	}
 }
 
 /******************************************************
@@ -433,5 +475,36 @@ void setMoleDifficulty(){
 		default:
 			mole_down_duration = 7;
 			mole_up_duration = 7;
+	}
+}
+
+
+/************************************************
+* Print end game stats and draw to screen
+*************************************************/
+void printStats(){
+	move(0,0);
+	printw("GAME STATS");
+	refresh();
+	move(1,0);
+	printw("Hit Accuracy: %d%%", molesHit/inaccurateHits);
+	refresh();
+	move(2,0);
+	printw("Moles Whacked: %d%%", molesHit/(molesHit+molesMissed));
+	refresh();
+	move(10,0);
+	printw("MOLES SMACKED: %d", molesHit);
+	refresh();
+	move(11,0);
+	printw("MOLES MISSED: %d", molesMissed);
+	refresh();
+	move(12,0);
+	printw("CRAPPY SWINGS: %d", inaccurateHits);
+	refresh();
+}
+
+void endGameSignalHandler(int signal){
+	if(signal == SIGSEGV){
+		exit(0);
 	}
 }
