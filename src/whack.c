@@ -223,7 +223,6 @@ void* moleQueue(void *target){
 		spotFound = 0;
 		waitUp = rand() % (mole_down_duration + 1 - 0);
 		waitDown = rand() % (mole_up_duration + 1 - 0);
-		// TODO only works with 6x6 grid right now
 
 		sleep(waitUp);
 		// Wait to access board
