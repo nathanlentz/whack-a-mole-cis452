@@ -35,11 +35,11 @@ int yMax, xMax;
 int isPlaying = 0; 	// 0: true, 1: false
 char *targets;
 char **board;
-int molesHit;
-int molesMissed;
+double molesHit;
+double molesMissed;
 int boardWidth;
 int boardHeight;
-int inaccurateHits;
+double inaccurateHits;
 
 struct game_settings {
 	int grid_height;
@@ -287,13 +287,18 @@ void* moleQueue(void *target){
 			}
 			startTime = time(NULL);
 		}
-		if(board[row][column] == *moleHead && isPlaying != 1){
-			pthread_mutex_lock(&moles_missed_mutex);
-			molesMissed++;
-			pthread_mutex_unlock(&moles_missed_mutex);
-		}
+
+		// After time is done, check board state
+		// If target is still up, player missed mole
 		pthread_mutex_lock(&edit_board_mutex);
+
+		if(board[row][column] == *moleHead && isPlaying != 1){
+			//pthread_mutex_lock(&moles_missed_mutex);
+			molesMissed++;
+			//pthread_mutex_unlock(&moles_missed_mutex);
+		}
 		board[row][column] = '_';
+
 		pthread_mutex_unlock(&edit_board_mutex);
 
 		sem_post(&mole_active_enter);
@@ -355,13 +360,13 @@ void updateBoard(int width, int height){
 	}
 	// Draw updated stat
 	move(10,1);
-	printw("WHACK STATS: %d LEFT", WIN_COUNT - molesHit);
+	printw("WHACK STATS: %.0f LEFT", WIN_COUNT - molesHit);
 	refresh();
 	move(11,1);
-	printw("MOLES MISSED: %d", molesMissed);
+	printw("MOLES MISSED: %.0f", molesMissed);
 	refresh();
 	move(12,1);
-	printw("CRAPPY SWINGS: %d", inaccurateHits);
+	printw("CRAPPY SWINGS: %.0f", inaccurateHits);
 	refresh();
 
 	if(molesHit == WIN_COUNT){
@@ -509,19 +514,19 @@ void printStats(){
 	printw("GAME STATS");
 	refresh();
 	move(1,0);
-	printw("Hit Accuracy: %d%%", inaccurateHits/(inaccurateHits+molesHit));
+	printw("Hit Accuracy: %.2f%%", molesHit/(inaccurateHits+molesHit));
 	refresh();
 	move(2,0);
 	double pert = molesHit/(molesHit+molesMissed);
-	printw("Moles Whacked: %d%%", pert);
+	printw("Moles Whacked: %.2f%%", pert);
 	refresh();
 	move(10,0);
-	printw("MOLES SMACKED: %d", molesHit);
+	printw("MOLES SMACKED: %.0f", molesHit);
 	refresh();
 	move(11,0);
-	printw("MOLES MISSED: %d", molesMissed);
+	printw("MOLES MISSED: %.0f", molesMissed);
 	refresh();
 	move(12,0);
-	printw("CRAPPY SWINGS: %d", inaccurateHits);
+	printw("CRAPPY SWINGS: %.0f", inaccurateHits);
 	refresh();
 }
