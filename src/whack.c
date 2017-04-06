@@ -41,6 +41,7 @@ int boardWidth;
 int boardHeight;
 double inaccurateHits;
 
+// Struct to define game settings from arguments
 struct game_settings {
 	int grid_height;
 	int grid_width;
@@ -89,7 +90,7 @@ int main (int argc, char *argv[])
 	int status;
 	srand(time(NULL));
 
-	// Set game settings
+	// Set game settings from arguments
 	gameSettings.grid_height = atoi(argv[1]);
 	gameSettings.grid_width = atoi(argv[2]);
 	gameSettings.num_moles = atoi(argv[3]);
@@ -157,7 +158,7 @@ int main (int argc, char *argv[])
 	refresh();
 
 
-	/* PRINT LARGE WHACK A MOLE TEXT HERE */
+	// Print Large Whack-A-Mole ascii art
 	move(0,0);
 	int c;
 	FILE *file;
@@ -168,6 +169,7 @@ int main (int argc, char *argv[])
 		}
 	}
 
+	// Draw initial game board before beginning
 	int gridX = xMax/3;
 	int gridY = yMax/2 - 5;
 	move(gridY, gridX);
@@ -187,10 +189,12 @@ int main (int argc, char *argv[])
 	pthread_t threads[gameSettings.num_moles];
 	pthread_t trackerThread;
 
+	// Create game tracker thread
 	if((status = pthread_create(&trackerThread, NULL, gameTracker, NULL)) != 0){
 			fprintf(stderr, "Game Tracker Error %d: %s\n", status, strerror(status));
 			endwin();
 	}
+	// Create all moles and send to mole queue
 	for(i = 0; i < gameSettings.num_moles; i++){
 		if((status = pthread_create(&threads[i], NULL, moleQueue, (void*)&targets[i])) != 0){
 			fprintf(stderr, "mole create error %d: %s\n", status, strerror(status));
@@ -198,12 +202,13 @@ int main (int argc, char *argv[])
 		}
 	}
 
+	// Loop for duration of game, updating board
 	while(isPlaying == 0){
 		updateBoard(gameSettings.grid_width, gameSettings.grid_height);
 	}
 
 
-
+	// Properly wait for all threads to finish before exiting
 	for(i = 0; i < 1; i++){
 		pthread_join(threads[i], NULL);
 	}	
@@ -223,7 +228,7 @@ int main (int argc, char *argv[])
 		;
 	}
 
-	// Clean UP
+	// Clean up concurrency and memory 
 	pthread_mutex_destroy(&hit_mutex);
 	pthread_mutex_destroy(&moles_missed_mutex);
 	pthread_mutex_destroy(&edit_board_mutex);
@@ -237,8 +242,8 @@ int main (int argc, char *argv[])
 }
 
 /******************************************************
-* Function for Moles to execute and loop in
-*
+* Function for Moles to execute and loop in until game
+* is complete
 *******************************************************/
 void* moleQueue(void *target){
 	char *moleHead = target;
@@ -251,6 +256,7 @@ void* moleQueue(void *target){
 	
 	while(isPlaying == 0){
 		spotFound = 0;
+		// Pick random period of time for both up and down
 		waitDown = (rand() % mole_down_duration + 1) + 2;
 		waitUp = (rand() % mole_up_duration + 1) + 2;
 
@@ -293,11 +299,14 @@ void* moleQueue(void *target){
 		pthread_mutex_lock(&edit_board_mutex);
 
 		if(board[row][column] == *moleHead && isPlaying != 1){
-			//pthread_mutex_lock(&moles_missed_mutex);
+			pthread_mutex_lock(&moles_missed_mutex);
 			molesMissed++;
-			//pthread_mutex_unlock(&moles_missed_mutex);
+			pthread_mutex_unlock(&moles_missed_mutex);
+			board[row][column] = '_';
+			
 		}
-		board[row][column] = '_';
+		// Set current index back to 'empty' for use by other moles
+		
 
 		pthread_mutex_unlock(&edit_board_mutex);
 
@@ -322,6 +331,8 @@ void* gameTracker(void *params){
 			break;
 		}
 
+		// Check board for characters matching input
+		// if character found, mole is hit and that index is reset
 		for(i = 0; i < boardWidth; i++){
 			for(j = 0; j < boardHeight; j++){
 				pthread_mutex_lock(&edit_board_mutex);
@@ -360,7 +371,7 @@ void updateBoard(int width, int height){
 	}
 	// Draw updated stat
 	move(10,1);
-	printw("WHACK STATS: %.0f LEFT", WIN_COUNT - molesHit);
+	printw("MOLES LEFT: %.0f", WIN_COUNT - molesHit);
 	refresh();
 	move(11,1);
 	printw("MOLES MISSED: %.0f", molesMissed);
